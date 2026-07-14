@@ -241,25 +241,27 @@ def kpi_card(label: str, value: int, note: str, icon: str):
 
 
 # =========================================================
-# SUMBER FAIL
+# SUMBER FAIL DARIPADA REPOSITORY GITHUB
 # =========================================================
-DEFAULT_FILE = Path("Working Laporan Asset SAP_EAsset.xlsx")
+# Streamlit Community Cloud akan clone keseluruhan repository GitHub.
+# Oleh itu, fail Excel dibaca terus daripada folder repository yang sama.
+APP_DIR = Path(__file__).resolve().parent
+EXCEL_FILE = APP_DIR / "Working Laporan Asset SAP_EAsset.xlsx"
 
 with st.sidebar:
     st.markdown("## 📊 Dashboard Aset")
     st.caption("Perbandingan rekod SAP dan E-Asset")
-    uploaded_file = st.file_uploader("Muat naik fail Excel", type=["xlsx", "xls"])
 
-if uploaded_file is not None:
-    excel_bytes = uploaded_file.getvalue()
-elif DEFAULT_FILE.exists():
-    excel_bytes = DEFAULT_FILE.read_bytes()
-else:
-    st.info(
-        "Sila muat naik fail **Working Laporan Asset SAP_EAsset.xlsx** melalui sidebar, "
-        "atau letakkan fail tersebut dalam folder yang sama dengan aplikasi Streamlit."
+if not EXCEL_FILE.exists():
+    st.error(
+        "Fail Excel tidak ditemui dalam repository GitHub. "
+        "Pastikan fail **Working Laporan Asset SAP_EAsset.xlsx** berada "
+        "dalam folder yang sama dengan fail aplikasi Streamlit."
     )
+    st.code(str(EXCEL_FILE))
     st.stop()
+
+excel_bytes = EXCEL_FILE.read_bytes()
 
 
 # =========================================================
