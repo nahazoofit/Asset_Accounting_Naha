@@ -1,5 +1,3 @@
-import io
-import os
 import re
 from pathlib import Path
 
@@ -123,35 +121,28 @@ def asset_category(asset_no: pd.Series) -> pd.Series:
     return category
 
 
-def first_non_blank(series: pd.Series):
-    values = series.dropna()
-    values = values[values.astype("string").str.strip().ne("")]
-    return values.iloc[0] if not values.empty else pd.NA
-
-
 def deduplicate_assets(df: pd.DataFrame, asset_col: str, eval_col: str) -> pd.DataFrame:
-    """Satu rekod bagi setiap nombor aset untuk tujuan KPI."""
+    """Ambil satu rekod bagi setiap nombor aset secara pantas."""
     if df.empty:
         return df.copy()
-
-    aggregation = {col: first_non_blank for col in df.columns if col != asset_col}
-    result = df.groupby(asset_col, as_index=False, dropna=False).agg(aggregation)
+    result = df.drop_duplicates(subset=[asset_col], keep="first").copy()
     result[asset_col] = normalize_asset_no(result[asset_col])
     result[eval_col] = normalize_eval_group(result[eval_col])
     return result
 
 
 @st.cache_data(show_spinner=False)
-def load_excel(file_bytes: bytes) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    book = pd.ExcelFile(io.BytesIO(file_bytes))
+def load_excel(file_path: str, modified_time: float) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    del modified_time
+    book = pd.ExcelFile(file_path)
     required = ["Aset_SAP_Raw", "E_Aset_Raw", "DIM Eva grp 1"]
     missing = [sheet for sheet in required if sheet not in book.sheet_names]
     if missing:
         raise ValueError(f"Sheet berikut tiada dalam Excel: {', '.join(missing)}")
 
-    sap = clean_column_names(pd.read_excel(book, sheet_name="Aset_SAP_Raw"))
-    easset = clean_column_names(pd.read_excel(book, sheet_name="E_Aset_Raw"))
-    dim = clean_column_names(pd.read_excel(book, sheet_name="DIM Eva grp 1"))
+    sap = clean_column_names(pd.read_excel(file_path, sheet_name="Aset_SAP_Raw"))
+    easset = clean_column_names(pd.read_excel(file_path, sheet_name="E_Aset_Raw"))
+    dim = clean_column_names(pd.read_excel(file_path, sheet_name="DIM Eva grp 1"))
     return sap, easset, dim
 
 
@@ -241,10 +232,8 @@ def kpi_card(label: str, value: int, note: str, icon: str):
 
 
 # =========================================================
-# SUMBER FAIL DARIPADA REPOSITORY GITHUB
+# SUMBER FAIL DAN PROSES DATA
 # =========================================================
-# Streamlit Community Cloud akan clone keseluruhan repository GitHub.
-# Oleh itu, fail Excel dibaca terus daripada folder repository yang sama.
 APP_DIR = Path(__file__).resolve().parent
 EXCEL_FILE = APP_DIR / "Working Laporan Asset SAP_EAsset.xlsx"
 
@@ -254,25 +243,20 @@ with st.sidebar:
 
 if not EXCEL_FILE.exists():
     st.error(
-        "Fail Excel tidak ditemui dalam repository GitHub. "
-        "Pastikan fail **Working Laporan Asset SAP_EAsset.xlsx** berada "
-        "dalam folder yang sama dengan fail aplikasi Streamlit."
+        "Fail Excel tidak ditemui. Pastikan fail "
+        "`Working Laporan Asset SAP_EAsset.xlsx` berada dalam folder GitHub "
+        "yang sama dengan fail aplikasi Python."
     )
-    st.code(str(EXCEL_FILE))
     st.stop()
 
-excel_bytes = EXCEL_FILE.read_bytes()
-
-
-# =========================================================
-# MUAT DAN PROSES DATA
-# =========================================================
 try:
     with st.spinner("Memproses data aset..."):
-        sap_raw, easset_raw, dim_raw = load_excel(excel_bytes)
+        sap_raw, easset_raw, dim_raw = load_excel(
+            str(EXCEL_FILE), EXCEL_FILE.stat().st_mtime
+        )
         sap_data, easset_data = prepare_data(sap_raw, easset_raw, dim_raw)
 except Exception as exc:
-    st.error(f"Fail tidak dapat diproses: {exc}")
+    st.exception(exc)
     st.stop()
 
 
