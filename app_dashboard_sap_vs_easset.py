@@ -31,11 +31,19 @@ st.markdown(
             background-color: #ffffff !important;
             color: #132238 !important;
         }
-        [data-testid="stSidebar"] div[data-baseweb="select"] span,
-        [data-testid="stSidebar"] div[data-baseweb="select"] input,
+        [data-testid="stSidebar"] div[data-baseweb="select"] *,
+        [data-testid="stSidebar"] div[data-baseweb="select"] input {
+            color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
+        }
         [data-testid="stSidebar"] div[data-baseweb="select"] svg {
-            color: #132238 !important;
-            fill: #132238 !important;
+            color: #000000 !important;
+            fill: #000000 !important;
+        }
+        div[data-baseweb="popover"] *,
+        ul[role="listbox"] * {
+            color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
         }
         [data-testid="stSidebar"] div[data-baseweb="tag"] {
             background-color: #dceaf7 !important;
@@ -407,7 +415,7 @@ with tab_easset:
 
 with tab_location:
     location_columns = [
-        "No. Aset SAP", "Nama Aset SAP", "Nama Aset E-Asset", "Kategori Aset",
+        "No. Aset SAP", "Nama Aset E-Asset", "Kategori Aset",
         "Eval Group SAP", "PTJ SAP", "Eval Group E-Asset", "PTJ E-Asset"
     ]
     st.dataframe(
