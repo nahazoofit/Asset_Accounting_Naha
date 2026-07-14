@@ -1,5 +1,3 @@
-import io
-import os
 import re
 from pathlib import Path
 
@@ -24,10 +22,26 @@ st.markdown(
         [data-testid="stSidebar"] { background: #132238; }
         [data-testid="stSidebar"] * { color: #ffffff; }
         [data-testid="stSidebar"] .stSelectbox label,
-        [data-testid="stSidebar"] .stMultiSelect label,
-        [data-testid="stSidebar"] .stFileUploader label {
+        [data-testid="stSidebar"] .stMultiSelect label {
             color: #ffffff !important;
             font-weight: 700;
+        }
+        /* Pastikan tulisan dalam kotak filter jelas */
+        [data-testid="stSidebar"] div[data-baseweb="select"] > div {
+            background-color: #ffffff !important;
+            color: #132238 !important;
+        }
+        [data-testid="stSidebar"] div[data-baseweb="select"] span,
+        [data-testid="stSidebar"] div[data-baseweb="select"] input,
+        [data-testid="stSidebar"] div[data-baseweb="select"] svg {
+            color: #132238 !important;
+            fill: #132238 !important;
+        }
+        [data-testid="stSidebar"] div[data-baseweb="tag"] {
+            background-color: #dceaf7 !important;
+        }
+        [data-testid="stSidebar"] div[data-baseweb="tag"] span {
+            color: #132238 !important;
         }
         .hero {
             padding: 1.20rem 1.45rem;
@@ -123,35 +137,28 @@ def asset_category(asset_no: pd.Series) -> pd.Series:
     return category
 
 
-def first_non_blank(series: pd.Series):
-    values = series.dropna()
-    values = values[values.astype("string").str.strip().ne("")]
-    return values.iloc[0] if not values.empty else pd.NA
-
-
 def deduplicate_assets(df: pd.DataFrame, asset_col: str, eval_col: str) -> pd.DataFrame:
-    """Satu rekod bagi setiap nombor aset untuk tujuan KPI."""
+    """Ambil satu rekod bagi setiap nombor aset secara pantas."""
     if df.empty:
         return df.copy()
-
-    aggregation = {col: first_non_blank for col in df.columns if col != asset_col}
-    result = df.groupby(asset_col, as_index=False, dropna=False).agg(aggregation)
+    result = df.drop_duplicates(subset=[asset_col], keep="first").copy()
     result[asset_col] = normalize_asset_no(result[asset_col])
     result[eval_col] = normalize_eval_group(result[eval_col])
     return result
 
 
 @st.cache_data(show_spinner=False)
-def load_excel(file_bytes: bytes) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    book = pd.ExcelFile(io.BytesIO(file_bytes))
+def load_excel(file_path: str, modified_time: float) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    del modified_time
+    book = pd.ExcelFile(file_path)
     required = ["Aset_SAP_Raw", "E_Aset_Raw", "DIM Eva grp 1"]
     missing = [sheet for sheet in required if sheet not in book.sheet_names]
     if missing:
         raise ValueError(f"Sheet berikut tiada dalam Excel: {', '.join(missing)}")
 
-    sap = clean_column_names(pd.read_excel(book, sheet_name="Aset_SAP_Raw"))
-    easset = clean_column_names(pd.read_excel(book, sheet_name="E_Aset_Raw"))
-    dim = clean_column_names(pd.read_excel(book, sheet_name="DIM Eva grp 1"))
+    sap = clean_column_names(pd.read_excel(file_path, sheet_name="Aset_SAP_Raw"))
+    easset = clean_column_names(pd.read_excel(file_path, sheet_name="E_Aset_Raw"))
+    dim = clean_column_names(pd.read_excel(file_path, sheet_name="DIM Eva grp 1"))
     return sap, easset, dim
 
 
@@ -171,6 +178,27 @@ def prepare_data(sap: pd.DataFrame, easset: pd.DataFrame, dim: pd.DataFrame):
     sap["Eval Group 1"] = normalize_eval_group(sap[sap_eval_col])
     easset["No. Aset SAP"] = normalize_asset_no(easset[easset_asset_col])
     easset["Eval Group 1"] = normalize_eval_group(easset[easset_eval_col])
+
+    # Nama aset diseragamkan untuk dipaparkan dalam semua jadual perbandingan.
+    if "Asset Description" in sap.columns:
+        sap["Nama Aset"] = sap["Asset Description"].astype("string").str.strip()
+        if "Asset Description_1" in sap.columns:
+            tambahan = sap["Asset Description_1"].astype("string").str.strip()
+            sap["Nama Aset"] = (
+                sap["Nama Aset"].fillna("") + " " + tambahan.fillna("")
+            ).str.replace(r"\s+", " ", regex=True).str.strip()
+    else:
+        sap["Nama Aset"] = pd.NA
+
+    if "Jenis" in easset.columns:
+        easset["Nama Aset"] = easset["Jenis"].astype("string").str.strip()
+        if "Jenama" in easset.columns:
+            jenama = easset["Jenama"].astype("string").str.strip()
+            easset["Nama Aset"] = (
+                easset["Nama Aset"].fillna("") + " - " + jenama.fillna("")
+            ).str.replace(r"\s+-\s*$", "", regex=True).str.strip()
+    else:
+        easset["Nama Aset"] = pd.NA
 
     # Buang rekod tanpa nombor aset.
     sap = sap[sap["No. Aset SAP"].notna()].copy()
@@ -212,11 +240,19 @@ def build_comparison(sap: pd.DataFrame, easset: pd.DataFrame):
     only_sap = sap[sap["No. Aset SAP"].isin(sap_ids - easset_ids)].copy()
     only_easset = easset[easset["No. Aset SAP"].isin(easset_ids - sap_ids)].copy()
 
-    sap_location = sap[["No. Aset SAP", "Eval Group 1", "PTJ", "Kategori Aset"]].rename(
-        columns={"Eval Group 1": "Eval Group SAP", "PTJ": "PTJ SAP"}
+    sap_location = sap[["No. Aset SAP", "Nama Aset", "Eval Group 1", "PTJ", "Kategori Aset"]].rename(
+        columns={
+            "Nama Aset": "Nama Aset SAP",
+            "Eval Group 1": "Eval Group SAP",
+            "PTJ": "PTJ SAP",
+        }
     )
-    easset_location = easset[["No. Aset SAP", "Eval Group 1", "PTJ"]].rename(
-        columns={"Eval Group 1": "Eval Group E-Asset", "PTJ": "PTJ E-Asset"}
+    easset_location = easset[["No. Aset SAP", "Nama Aset", "Eval Group 1", "PTJ"]].rename(
+        columns={
+            "Nama Aset": "Nama Aset E-Asset",
+            "Eval Group 1": "Eval Group E-Asset",
+            "PTJ": "PTJ E-Asset",
+        }
     )
 
     matched = sap_location.merge(easset_location, on="No. Aset SAP", how="inner")
@@ -241,36 +277,31 @@ def kpi_card(label: str, value: int, note: str, icon: str):
 
 
 # =========================================================
-# SUMBER FAIL
+# SUMBER FAIL DAN PROSES DATA
 # =========================================================
-DEFAULT_FILE = Path("Working Laporan Asset SAP_EAsset.xlsx")
+APP_DIR = Path(__file__).resolve().parent
+EXCEL_FILE = APP_DIR / "Working Laporan Asset SAP_EAsset.xlsx"
 
 with st.sidebar:
     st.markdown("## 📊 Dashboard Aset")
     st.caption("Perbandingan rekod SAP dan E-Asset")
-    uploaded_file = st.file_uploader("Muat naik fail Excel", type=["xlsx", "xls"])
 
-if uploaded_file is not None:
-    excel_bytes = uploaded_file.getvalue()
-elif DEFAULT_FILE.exists():
-    excel_bytes = DEFAULT_FILE.read_bytes()
-else:
-    st.info(
-        "Sila muat naik fail **Working Laporan Asset SAP_EAsset.xlsx** melalui sidebar, "
-        "atau letakkan fail tersebut dalam folder yang sama dengan aplikasi Streamlit."
+if not EXCEL_FILE.exists():
+    st.error(
+        "Fail Excel tidak ditemui. Pastikan fail "
+        "`Working Laporan Asset SAP_EAsset.xlsx` berada dalam folder GitHub "
+        "yang sama dengan fail aplikasi Python."
     )
     st.stop()
 
-
-# =========================================================
-# MUAT DAN PROSES DATA
-# =========================================================
 try:
     with st.spinner("Memproses data aset..."):
-        sap_raw, easset_raw, dim_raw = load_excel(excel_bytes)
+        sap_raw, easset_raw, dim_raw = load_excel(
+            str(EXCEL_FILE), EXCEL_FILE.stat().st_mtime
+        )
         sap_data, easset_data = prepare_data(sap_raw, easset_raw, dim_raw)
 except Exception as exc:
-    st.error(f"Fail tidak dapat diproses: {exc}")
+    st.exception(exc)
     st.stop()
 
 
@@ -348,8 +379,8 @@ tab_sap, tab_easset, tab_location = st.tabs(
 
 with tab_sap:
     preferred = [
-        "No. Aset SAP", "Eval Group 1", "PTJ", "Kategori Aset",
-        "Asset Description", "Asset Description_1", "Acquis.val.", "Book val."
+        "No. Aset SAP", "Nama Aset", "Eval Group 1", "PTJ", "Kategori Aset",
+        "Acquis.val.", "Book val."
     ]
     columns = [c for c in preferred if c in only_sap.columns]
     st.dataframe(only_sap[columns], use_container_width=True, hide_index=True, height=470)
@@ -362,8 +393,8 @@ with tab_sap:
 
 with tab_easset:
     preferred = [
-        "No. Aset SAP", "No. Siri Pendaftaran", "Eval Group 1", "PTJ",
-        "Kategori Aset", "Jenis", "Jenama", "Lokasi", "Pegawai Penempatan", "Harga (RM)"
+        "No. Aset SAP", "Nama Aset", "No. Siri Pendaftaran", "Eval Group 1", "PTJ",
+        "Kategori Aset", "Lokasi", "Pegawai Penempatan", "Harga (RM)"
     ]
     columns = [c for c in preferred if c in only_easset.columns]
     st.dataframe(only_easset[columns], use_container_width=True, hide_index=True, height=470)
@@ -376,8 +407,8 @@ with tab_easset:
 
 with tab_location:
     location_columns = [
-        "No. Aset SAP", "Kategori Aset", "Eval Group SAP", "PTJ SAP",
-        "Eval Group E-Asset", "PTJ E-Asset"
+        "No. Aset SAP", "Nama Aset SAP", "Nama Aset E-Asset", "Kategori Aset",
+        "Eval Group SAP", "PTJ SAP", "Eval Group E-Asset", "PTJ E-Asset"
     ]
     st.dataframe(
         different_location[location_columns],
