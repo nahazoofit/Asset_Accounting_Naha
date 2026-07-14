@@ -32,7 +32,14 @@ st.markdown(
             color: #132238 !important;
         }
         [data-testid="stSidebar"] div[data-baseweb="select"] *,
-        [data-testid="stSidebar"] div[data-baseweb="select"] input {
+        [data-testid="stSidebar"] div[data-baseweb="select"] input,
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] span,
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] p {
+            color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
+        }
+        /* Teks pilihan semasa dalam filter Kategori Aset */
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] > div {
             color: #000000 !important;
             -webkit-text-fill-color: #000000 !important;
         }
@@ -138,10 +145,17 @@ def normalize_eval_group(series: pd.Series) -> pd.Series:
 
 
 def asset_category(asset_no: pd.Series) -> pd.Series:
+    """Klasifikasi aset berdasarkan nombor aset SAP.
+
+    Aset Tak Ketara: 800000000 hingga 999999999.
+    Semua nombor aset sah yang lain dikategorikan sebagai Aset Alih.
+    """
     numeric = pd.to_numeric(asset_no, errors="coerce")
     category = pd.Series("Lain-lain", index=asset_no.index, dtype="string")
-    category.loc[numeric.between(100_000_000, 699_999_999, inclusive="both")] = "Aset Alih"
-    category.loc[numeric.between(700_000_000, 999_999_999, inclusive="both")] = "Aset Tak Ketara"
+
+    valid_asset = numeric.notna()
+    category.loc[valid_asset] = "Aset Alih"
+    category.loc[numeric.between(800_000_000, 999_999_999, inclusive="both")] = "Aset Tak Ketara"
     return category
 
 
