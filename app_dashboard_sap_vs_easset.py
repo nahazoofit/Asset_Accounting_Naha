@@ -1,0 +1,393 @@
+import io
+import os
+import re
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
+
+
+# =========================================================
+# KONFIGURASI HALAMAN
+# =========================================================
+st.set_page_config(
+    page_title="Dashboard SAP vs E-Asset",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.markdown(
+    """
+    <style>
+        .stApp { background-color: #f4f7fb; }
+        [data-testid="stSidebar"] { background: #132238; }
+        [data-testid="stSidebar"] * { color: #ffffff; }
+        [data-testid="stSidebar"] .stSelectbox label,
+        [data-testid="stSidebar"] .stMultiSelect label,
+        [data-testid="stSidebar"] .stFileUploader label {
+            color: #ffffff !important;
+            font-weight: 700;
+        }
+        .hero {
+            padding: 1.20rem 1.45rem;
+            border-radius: 18px;
+            background: linear-gradient(135deg, #102a43 0%, #1f5f8b 100%);
+            color: white;
+            margin-bottom: 1rem;
+            box-shadow: 0 10px 28px rgba(16, 42, 67, 0.16);
+        }
+        .hero h1 { margin: 0; font-size: 2rem; }
+        .hero p { margin: .35rem 0 0; opacity: .86; }
+        .kpi-card {
+            background: white;
+            border: 1px solid #e6edf5;
+            border-radius: 16px;
+            padding: 1.10rem 1.20rem;
+            box-shadow: 0 6px 20px rgba(15, 40, 65, 0.07);
+            min-height: 128px;
+        }
+        .kpi-label {
+            color: #60758a;
+            font-size: .88rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .03em;
+        }
+        .kpi-value {
+            color: #132238;
+            font-size: 2.15rem;
+            font-weight: 800;
+            line-height: 1.2;
+            margin-top: .4rem;
+        }
+        .kpi-note { color: #7b8fa3; font-size: .82rem; margin-top: .35rem; }
+        .section-title {
+            font-size: 1.15rem;
+            font-weight: 800;
+            color: #183b56;
+            margin: .7rem 0 .5rem;
+        }
+        div[data-testid="stDataFrame"] {
+            background: white;
+            padding: .4rem;
+            border-radius: 14px;
+            border: 1px solid #e6edf5;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# =========================================================
+# FUNGSI UTILITI
+# =========================================================
+def clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [re.sub(r"\s+", " ", str(c)).strip() for c in df.columns]
+    return df
+
+
+def find_column(df: pd.DataFrame, candidates: list[str]) -> str:
+    lookup = {str(c).strip().lower(): c for c in df.columns}
+    for candidate in candidates:
+        key = candidate.strip().lower()
+        if key in lookup:
+            return lookup[key]
+    raise KeyError(
+        f"Kolum tidak ditemui. Kolum diperlukan: {', '.join(candidates)}. "
+        f"Kolum tersedia: {', '.join(map(str, df.columns))}"
+    )
+
+
+def normalize_asset_no(series: pd.Series) -> pd.Series:
+    """Standardkan nombor aset supaya 100000004.0 menjadi 100000004."""
+    out = series.astype("string").str.strip()
+    out = out.str.replace(r"\.0$", "", regex=True)
+    out = out.str.replace(r"\s+", "", regex=True)
+    out = out.replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "<NA>": pd.NA})
+    return out
+
+
+def normalize_eval_group(series: pd.Series) -> pd.Series:
+    out = series.astype("string").str.strip().str.upper()
+    return out.replace({"": pd.NA, "NAN": pd.NA, "NONE": pd.NA, "<NA>": pd.NA})
+
+
+def asset_category(asset_no: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(asset_no, errors="coerce")
+    category = pd.Series("Lain-lain", index=asset_no.index, dtype="string")
+    category.loc[numeric.between(100_000_000, 699_999_999, inclusive="both")] = "Aset Alih"
+    category.loc[numeric.between(700_000_000, 999_999_999, inclusive="both")] = "Aset Tak Ketara"
+    return category
+
+
+def first_non_blank(series: pd.Series):
+    values = series.dropna()
+    values = values[values.astype("string").str.strip().ne("")]
+    return values.iloc[0] if not values.empty else pd.NA
+
+
+def deduplicate_assets(df: pd.DataFrame, asset_col: str, eval_col: str) -> pd.DataFrame:
+    """Satu rekod bagi setiap nombor aset untuk tujuan KPI."""
+    if df.empty:
+        return df.copy()
+
+    aggregation = {col: first_non_blank for col in df.columns if col != asset_col}
+    result = df.groupby(asset_col, as_index=False, dropna=False).agg(aggregation)
+    result[asset_col] = normalize_asset_no(result[asset_col])
+    result[eval_col] = normalize_eval_group(result[eval_col])
+    return result
+
+
+@st.cache_data(show_spinner=False)
+def load_excel(file_bytes: bytes) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    book = pd.ExcelFile(io.BytesIO(file_bytes))
+    required = ["Aset_SAP_Raw", "E_Aset_Raw", "DIM Eva grp 1"]
+    missing = [sheet for sheet in required if sheet not in book.sheet_names]
+    if missing:
+        raise ValueError(f"Sheet berikut tiada dalam Excel: {', '.join(missing)}")
+
+    sap = clean_column_names(pd.read_excel(book, sheet_name="Aset_SAP_Raw"))
+    easset = clean_column_names(pd.read_excel(book, sheet_name="E_Aset_Raw"))
+    dim = clean_column_names(pd.read_excel(book, sheet_name="DIM Eva grp 1"))
+    return sap, easset, dim
+
+
+def prepare_data(sap: pd.DataFrame, easset: pd.DataFrame, dim: pd.DataFrame):
+    sap_asset_col = find_column(sap, ["No. Aset SAP", "No Aset SAP"])
+    sap_eval_col = find_column(sap, ["Eval Group 1", "Eval. Group 1"])
+    easset_asset_col = find_column(easset, ["No. Aset SAP", "No Aset SAP"])
+    easset_eval_col = find_column(easset, ["Eval Group 1", "Eval. Group 1"])
+    dim_eval_col = find_column(dim, ["Eval Group 1", "Eval. Group 1"])
+    dim_ptj_col = find_column(dim, ["Detail 3", "PTJ"])
+
+    sap = sap.copy()
+    easset = easset.copy()
+    dim = dim.copy()
+
+    sap["No. Aset SAP"] = normalize_asset_no(sap[sap_asset_col])
+    sap["Eval Group 1"] = normalize_eval_group(sap[sap_eval_col])
+    easset["No. Aset SAP"] = normalize_asset_no(easset[easset_asset_col])
+    easset["Eval Group 1"] = normalize_eval_group(easset[easset_eval_col])
+
+    # Buang rekod tanpa nombor aset.
+    sap = sap[sap["No. Aset SAP"].notna()].copy()
+    easset = easset[easset["No. Aset SAP"].notna()].copy()
+
+    dim["Eval Group 1"] = normalize_eval_group(dim[dim_eval_col])
+    dim["PTJ"] = dim[dim_ptj_col].astype("string").str.strip()
+    ptj_map = (
+        dim.dropna(subset=["Eval Group 1"])
+        .drop_duplicates("Eval Group 1")
+        .set_index("Eval Group 1")["PTJ"]
+        .to_dict()
+    )
+
+    sap["Kategori Aset"] = asset_category(sap["No. Aset SAP"])
+    easset["Kategori Aset"] = asset_category(easset["No. Aset SAP"])
+    sap["PTJ"] = sap["Eval Group 1"].map(ptj_map).fillna("Tidak Dipetakan")
+    easset["PTJ"] = easset["Eval Group 1"].map(ptj_map).fillna("Tidak Dipetakan")
+
+    sap_unique = deduplicate_assets(sap, "No. Aset SAP", "Eval Group 1")
+    easset_unique = deduplicate_assets(easset, "No. Aset SAP", "Eval Group 1")
+
+    return sap_unique, easset_unique
+
+
+def filter_source(df: pd.DataFrame, category: str, selected_ptj: list[str]) -> pd.DataFrame:
+    result = df.copy()
+    if category != "Semua":
+        result = result[result["Kategori Aset"] == category]
+    if selected_ptj:
+        result = result[result["PTJ"].isin(selected_ptj)]
+    return result
+
+
+def build_comparison(sap: pd.DataFrame, easset: pd.DataFrame):
+    sap_ids = set(sap["No. Aset SAP"].dropna())
+    easset_ids = set(easset["No. Aset SAP"].dropna())
+
+    only_sap = sap[sap["No. Aset SAP"].isin(sap_ids - easset_ids)].copy()
+    only_easset = easset[easset["No. Aset SAP"].isin(easset_ids - sap_ids)].copy()
+
+    sap_location = sap[["No. Aset SAP", "Eval Group 1", "PTJ", "Kategori Aset"]].rename(
+        columns={"Eval Group 1": "Eval Group SAP", "PTJ": "PTJ SAP"}
+    )
+    easset_location = easset[["No. Aset SAP", "Eval Group 1", "PTJ"]].rename(
+        columns={"Eval Group 1": "Eval Group E-Asset", "PTJ": "PTJ E-Asset"}
+    )
+
+    matched = sap_location.merge(easset_location, on="No. Aset SAP", how="inner")
+    different_location = matched[
+        matched["Eval Group SAP"].fillna("") != matched["Eval Group E-Asset"].fillna("")
+    ].copy()
+
+    return only_sap, only_easset, different_location
+
+
+def kpi_card(label: str, value: int, note: str, icon: str):
+    st.markdown(
+        f"""
+        <div class="kpi-card">
+            <div class="kpi-label">{icon} {label}</div>
+            <div class="kpi-value">{value:,}</div>
+            <div class="kpi-note">{note}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# =========================================================
+# SUMBER FAIL
+# =========================================================
+DEFAULT_FILE = Path("Working Laporan Asset SAP_EAsset.xlsx")
+
+with st.sidebar:
+    st.markdown("## 📊 Dashboard Aset")
+    st.caption("Perbandingan rekod SAP dan E-Asset")
+    uploaded_file = st.file_uploader("Muat naik fail Excel", type=["xlsx", "xls"])
+
+if uploaded_file is not None:
+    excel_bytes = uploaded_file.getvalue()
+elif DEFAULT_FILE.exists():
+    excel_bytes = DEFAULT_FILE.read_bytes()
+else:
+    st.info(
+        "Sila muat naik fail **Working Laporan Asset SAP_EAsset.xlsx** melalui sidebar, "
+        "atau letakkan fail tersebut dalam folder yang sama dengan aplikasi Streamlit."
+    )
+    st.stop()
+
+
+# =========================================================
+# MUAT DAN PROSES DATA
+# =========================================================
+try:
+    with st.spinner("Memproses data aset..."):
+        sap_raw, easset_raw, dim_raw = load_excel(excel_bytes)
+        sap_data, easset_data = prepare_data(sap_raw, easset_raw, dim_raw)
+except Exception as exc:
+    st.error(f"Fail tidak dapat diproses: {exc}")
+    st.stop()
+
+
+# =========================================================
+# FILTER SIDEBAR
+# =========================================================
+all_ptj = sorted(
+    set(sap_data["PTJ"].dropna().astype(str))
+    | set(easset_data["PTJ"].dropna().astype(str))
+)
+
+with st.sidebar:
+    st.markdown("---")
+    category_filter = st.selectbox(
+        "Kategori Aset",
+        ["Semua", "Aset Alih", "Aset Tak Ketara"],
+        index=0,
+    )
+    ptj_filter = st.multiselect(
+        "PTJ",
+        options=all_ptj,
+        placeholder="Semua PTJ",
+    )
+    st.markdown("---")
+    st.caption("Sumber: Aset_SAP_Raw, E_Aset_Raw dan DIM Eva grp 1")
+
+sap_filtered = filter_source(sap_data, category_filter, ptj_filter)
+easset_filtered = filter_source(easset_data, category_filter, ptj_filter)
+only_sap, only_easset, different_location = build_comparison(sap_filtered, easset_filtered)
+
+
+# =========================================================
+# PAPARAN UTAMA
+# =========================================================
+st.markdown(
+    """
+    <div class="hero">
+        <h1>Dashboard SAP vs E-Asset</h1>
+        <p>Analisis kesepadanan aset berdasarkan nombor aset, lokasi dan PTJ.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+active_filters = [f"Kategori: {category_filter}"]
+active_filters.append(f"PTJ: {', '.join(ptj_filter)}" if ptj_filter else "PTJ: Semua")
+st.caption(" | ".join(active_filters))
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    kpi_card("Hanya di SAP", len(only_sap), "Wujud dalam SAP tetapi tiada dalam E-Asset", "🟦")
+with col2:
+    kpi_card("Hanya di E-Asset", len(only_easset), "Wujud dalam E-Asset tetapi tiada dalam SAP", "🟩")
+with col3:
+    kpi_card(
+        "Aset Berlainan Lokasi",
+        len(different_location),
+        "Nombor aset sama tetapi Eval Group 1 berbeza",
+        "🟧",
+    )
+
+st.markdown("<div class='section-title'>Ringkasan Data Ditapis</div>", unsafe_allow_html=True)
+summary1, summary2 = st.columns(2)
+summary1.metric("Jumlah Aset SAP", f"{len(sap_filtered):,}")
+summary2.metric("Jumlah Aset E-Asset", f"{len(easset_filtered):,}")
+
+st.markdown("<div class='section-title'>Butiran Perbandingan</div>", unsafe_allow_html=True)
+tab_sap, tab_easset, tab_location = st.tabs(
+    [
+        f"Hanya di SAP ({len(only_sap):,})",
+        f"Hanya di E-Asset ({len(only_easset):,})",
+        f"Berlainan Lokasi ({len(different_location):,})",
+    ]
+)
+
+with tab_sap:
+    preferred = [
+        "No. Aset SAP", "Eval Group 1", "PTJ", "Kategori Aset",
+        "Asset Description", "Asset Description_1", "Acquis.val.", "Book val."
+    ]
+    columns = [c for c in preferred if c in only_sap.columns]
+    st.dataframe(only_sap[columns], use_container_width=True, hide_index=True, height=470)
+    st.download_button(
+        "Muat turun CSV — Hanya di SAP",
+        only_sap[columns].to_csv(index=False).encode("utf-8-sig"),
+        file_name="hanya_di_sap.csv",
+        mime="text/csv",
+    )
+
+with tab_easset:
+    preferred = [
+        "No. Aset SAP", "No. Siri Pendaftaran", "Eval Group 1", "PTJ",
+        "Kategori Aset", "Jenis", "Jenama", "Lokasi", "Pegawai Penempatan", "Harga (RM)"
+    ]
+    columns = [c for c in preferred if c in only_easset.columns]
+    st.dataframe(only_easset[columns], use_container_width=True, hide_index=True, height=470)
+    st.download_button(
+        "Muat turun CSV — Hanya di E-Asset",
+        only_easset[columns].to_csv(index=False).encode("utf-8-sig"),
+        file_name="hanya_di_easset.csv",
+        mime="text/csv",
+    )
+
+with tab_location:
+    location_columns = [
+        "No. Aset SAP", "Kategori Aset", "Eval Group SAP", "PTJ SAP",
+        "Eval Group E-Asset", "PTJ E-Asset"
+    ]
+    st.dataframe(
+        different_location[location_columns],
+        use_container_width=True,
+        hide_index=True,
+        height=470,
+    )
+    st.download_button(
+        "Muat turun CSV — Aset Berlainan Lokasi",
+        different_location[location_columns].to_csv(index=False).encode("utf-8-sig"),
+        file_name="aset_berlainan_lokasi.csv",
+        mime="text/csv",
+    )
