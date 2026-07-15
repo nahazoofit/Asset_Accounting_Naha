@@ -298,6 +298,27 @@ def kpi_card(label: str, value: int, note: str, icon: str):
     )
 
 
+def count_by_column(df: pd.DataFrame, column: str, value_name: str = "Jumlah Aset") -> pd.DataFrame:
+    """Sediakan ringkasan bilangan aset bagi tujuan graf."""
+    if df.empty or column not in df.columns:
+        return pd.DataFrame(columns=[value_name])
+
+    chart_data = (
+        df[column]
+        .fillna("Tidak Dipetakan")
+        .astype(str)
+        .value_counts()
+        .rename(value_name)
+        .to_frame()
+    )
+    chart_data.index.name = column
+    return chart_data
+
+
+def show_empty_chart_message():
+    st.info("Tiada data untuk dipaparkan dalam graf berdasarkan tapisan semasa.")
+
+
 # =========================================================
 # SUMBER FAIL DAN PROSES DATA
 # =========================================================
@@ -390,6 +411,15 @@ summary1, summary2 = st.columns(2)
 summary1.metric("Jumlah Aset SAP", f"{len(sap_filtered):,}")
 summary2.metric("Jumlah Aset E-Asset", f"{len(easset_filtered):,}")
 
+st.markdown("<div class='section-title'>Graf Ringkasan Laporan</div>", unsafe_allow_html=True)
+overall_chart = pd.DataFrame(
+    {
+        "Jenis Laporan": ["Hanya di SAP", "Hanya di E-Asset", "Berlainan Lokasi"],
+        "Jumlah Aset": [len(only_sap), len(only_easset), len(different_location)],
+    }
+).set_index("Jenis Laporan")
+st.bar_chart(overall_chart, use_container_width=True, height=360)
+
 st.markdown("<div class='section-title'>Butiran Perbandingan</div>", unsafe_allow_html=True)
 tab_sap, tab_easset, tab_location = st.tabs(
     [
@@ -400,6 +430,13 @@ tab_sap, tab_easset, tab_location = st.tabs(
 )
 
 with tab_sap:
+    st.markdown("#### Graf Hanya di SAP Mengikut PTJ")
+    only_sap_chart = count_by_column(only_sap, "PTJ")
+    if only_sap_chart.empty:
+        show_empty_chart_message()
+    else:
+        st.bar_chart(only_sap_chart, use_container_width=True, height=420)
+
     preferred = [
         "No. Aset SAP", "Nama Aset", "Eval Group 1", "PTJ", "Kategori Aset",
         "Acquis.val.", "Book val."
@@ -414,6 +451,13 @@ with tab_sap:
     )
 
 with tab_easset:
+    st.markdown("#### Graf Hanya di E-Asset Mengikut PTJ")
+    only_easset_chart = count_by_column(only_easset, "PTJ")
+    if only_easset_chart.empty:
+        show_empty_chart_message()
+    else:
+        st.bar_chart(only_easset_chart, use_container_width=True, height=420)
+
     preferred = [
         "No. Aset SAP", "Nama Aset", "No. Siri Pendaftaran", "Eval Group 1", "PTJ",
         "Kategori Aset", "Lokasi", "Pegawai Penempatan", "Harga (RM)"
@@ -428,6 +472,20 @@ with tab_easset:
     )
 
 with tab_location:
+    st.markdown("#### Graf Aset Berlainan Lokasi Mengikut PTJ")
+    if different_location.empty:
+        show_empty_chart_message()
+    else:
+        sap_ptj_chart = count_by_column(
+            different_location, "PTJ SAP", "Lokasi dalam SAP"
+        )
+        easset_ptj_chart = count_by_column(
+            different_location, "PTJ E-Asset", "Lokasi dalam E-Asset"
+        )
+        location_chart = sap_ptj_chart.join(easset_ptj_chart, how="outer").fillna(0)
+        location_chart = location_chart.astype(int)
+        st.bar_chart(location_chart, use_container_width=True, height=450)
+
     location_columns = [
         "No. Aset SAP", "Nama Aset E-Asset", "Kategori Aset",
         "Eval Group SAP", "PTJ SAP", "Eval Group E-Asset", "PTJ E-Asset"
