@@ -404,6 +404,9 @@ def interactive_ptj_chart(
                     labelColor=ptj_label_color,
                     titleColor=ptj_label_color,
                     labelFontWeight="bold",
+                    labelOverlap=False,
+                    labelLimit=0,
+                    labelBound=False,
                 ),
             ),
             y=alt.Y("Jumlah Aset:Q", title=series_label),
@@ -472,7 +475,17 @@ def interactive_location_chart(df: pd.DataFrame, chart_key: str):
         alt.Chart(chart_df)
         .mark_bar(cornerRadiusEnd=3)
         .encode(
-            x=alt.X("PTJ:N", sort="-y", title="PTJ", axis=alt.Axis(labelAngle=-45)),
+            x=alt.X(
+                "PTJ:N",
+                sort="-y",
+                title="PTJ",
+                axis=alt.Axis(
+                    labelAngle=-45,
+                    labelOverlap=False,
+                    labelLimit=0,
+                    labelBound=False,
+                ),
+            ),
             y=alt.Y("Jumlah Aset:Q", title="Jumlah Aset"),
             xOffset=alt.XOffset("Sumber Lokasi:N"),
             color=alt.Color("Sumber Lokasi:N", title="Sumber Lokasi"),
