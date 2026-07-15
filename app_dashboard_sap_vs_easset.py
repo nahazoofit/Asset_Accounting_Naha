@@ -593,32 +593,54 @@ active_filters = [f"Kategori: {category_filter}"]
 active_filters.append(f"PTJ: {', '.join(ptj_filter)}" if ptj_filter else "PTJ: Semua")
 st.caption(" | ".join(active_filters))
 
+# Jumlah keseluruhan menggunakan nombor aset unik selepas tapisan sidebar.
+# Nilai ini bukan jumlah ketidakpadanan; ia ialah jumlah aset dalam setiap sistem.
+st.markdown("<div class='section-title'>JUMLAH ASET CIDB</div>", unsafe_allow_html=True)
+total1, total2 = st.columns(2)
+with total1:
+    kpi_card(
+        "Jumlah Aset Unik SAP",
+        len(sap_filtered),
+        "Jumlah keseluruhan No. Aset unik dalam SAP berdasarkan tapisan semasa",
+        "🏢",
+    )
+with total2:
+    kpi_card(
+        "Jumlah Aset Unik E-Asset",
+        len(easset_filtered),
+        "Jumlah keseluruhan No. Aset unik dalam E-Asset berdasarkan tapisan semasa",
+        "🗂️",
+    )
+
+st.markdown("<div class='section-title'>Ringkasan Perbezaan SAP dan E-Asset</div>", unsafe_allow_html=True)
 col1, col2, col3 = st.columns(3)
 with col1:
-    kpi_card("Hanya di SAP", len(only_sap), "Wujud dalam SAP tetapi tiada dalam E-Asset", "🟦")
+    kpi_card(
+        "Hanya di SAP",
+        len(only_sap),
+        "Sebahagian daripada jumlah SAP yang tiada dalam E-Asset",
+        "🟦",
+    )
 with col2:
-    kpi_card("Hanya di E-Asset", len(only_easset), "Wujud dalam E-Asset tetapi tiada dalam SAP", "🟩")
+    kpi_card(
+        "Hanya di E-Asset",
+        len(only_easset),
+        "Sebahagian daripada jumlah E-Asset yang tiada dalam SAP",
+        "🟩",
+    )
 with col3:
     kpi_card(
         "Aset Berlainan Lokasi",
         len(different_location),
-        "Nombor aset sama tetapi Eval Group 1 berbeza",
+        "Aset wujud dalam kedua-dua sistem tetapi Eval Group 1 berbeza",
         "🟧",
     )
 
-st.markdown("<div class='section-title'>Ringkasan Data Ditapis</div>", unsafe_allow_html=True)
-summary1, summary2 = st.columns(2)
-summary1.metric("Jumlah Aset SAP", f"{len(sap_filtered):,}")
-summary2.metric("Jumlah Aset E-Asset", f"{len(easset_filtered):,}")
-
-st.markdown("<div class='section-title'>Graf Ringkasan Laporan</div>", unsafe_allow_html=True)
-overall_chart = pd.DataFrame(
-    {
-        "Jenis Laporan": ["Hanya di SAP", "Hanya di E-Asset", "Berlainan Lokasi"],
-        "Jumlah Aset": [len(only_sap), len(only_easset), len(different_location)],
-    }
-).set_index("Jenis Laporan")
-st.bar_chart(overall_chart, use_container_width=True, height=360)
+st.info(
+    "Jumlah keseluruhan SAP/E-Asset ialah jumlah nombor aset unik dalam setiap sistem. "
+    "Laporan Hanya di SAP, Hanya di E-Asset dan Berlainan Lokasi pula hanya menunjukkan ketidakpadanan, "
+    "jadi jumlah laporan tersebut memang tidak sama dengan jumlah keseluruhan aset."
+)
 
 st.markdown("<div class='section-title'>Butiran Perbandingan</div>", unsafe_allow_html=True)
 tab_sap, tab_easset, tab_location = st.tabs(
