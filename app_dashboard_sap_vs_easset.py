@@ -148,14 +148,15 @@ def normalize_eval_group(series: pd.Series) -> pd.Series:
 def asset_category(asset_no: pd.Series) -> pd.Series:
     """Klasifikasi aset berdasarkan nombor aset SAP.
 
-    Aset Tak Ketara: 800000000 hingga 999999999.
-    Semua nombor aset sah yang lain dikategorikan sebagai Aset Alih.
+    Aset Tak Alih  : nombor aset 299999999 dan ke bawah.
+    Aset Alih      : nombor aset 300000000 hingga 799999999.
+    Aset Tak Ketara: nombor aset 800000000 hingga 999999999.
     """
     numeric = pd.to_numeric(asset_no, errors="coerce")
     category = pd.Series("Lain-lain", index=asset_no.index, dtype="string")
 
-    valid_asset = numeric.notna()
-    category.loc[valid_asset] = "Aset Alih"
+    category.loc[numeric.between(0, 299_999_999, inclusive="both")] = "Aset Tak Alih"
+    category.loc[numeric.between(300_000_000, 799_999_999, inclusive="both")] = "Aset Alih"
     category.loc[numeric.between(800_000_000, 999_999_999, inclusive="both")] = "Aset Tak Ketara"
     return category
 
@@ -559,7 +560,7 @@ with st.sidebar:
     st.markdown("---")
     category_filter = st.selectbox(
         "Kategori Aset",
-        ["Semua", "Aset Alih", "Aset Tak Ketara"],
+        ["Semua", "Aset Tak Alih", "Aset Alih", "Aset Tak Ketara"],
         index=0,
     )
     ptj_filter = st.multiselect(
