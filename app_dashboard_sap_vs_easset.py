@@ -639,14 +639,14 @@ st.markdown("<div class='section-title'>JUMLAH ASET CIDB</div>", unsafe_allow_ht
 total1, total2 = st.columns(2)
 with total1:
     kpi_card(
-        "Jumlah Aset Unik SAP",
+        "Jumlah Aset SAP",
         len(sap_filtered),
         "Jumlah keseluruhan No. Aset unik dalam SAP berdasarkan tapisan semasa",
         "🏢",
     )
 with total2:
     kpi_card(
-        "Jumlah Aset Unik E-Asset",
+        "Jumlah Aset E-Asset",
         len(easset_filtered),
         "Jumlah keseluruhan No. Aset unik dalam E-Asset berdasarkan tapisan semasa",
         "🗂️",
