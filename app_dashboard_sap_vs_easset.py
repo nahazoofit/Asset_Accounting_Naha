@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -319,6 +320,129 @@ def show_empty_chart_message():
     st.info("Tiada data untuk dipaparkan dalam graf berdasarkan tapisan semasa.")
 
 
+def interactive_ptj_chart(
+    df: pd.DataFrame,
+    ptj_column: str,
+    chart_key: str,
+    title: str,
+    series_label: str = "Jumlah Aset",
+):
+    """Papar graf PTJ yang boleh diklik dan pulangkan PTJ yang dipilih."""
+    if df.empty or ptj_column not in df.columns:
+        show_empty_chart_message()
+        return None
+
+    chart_df = (
+        df[ptj_column]
+        .fillna("Tidak Dipetakan")
+        .astype(str)
+        .value_counts()
+        .rename_axis("PTJ")
+        .reset_index(name="Jumlah Aset")
+        .sort_values("Jumlah Aset", ascending=False)
+    )
+
+    chart = (
+        alt.Chart(chart_df)
+        .mark_bar(cornerRadiusEnd=4)
+        .encode(
+            x=alt.X("PTJ:N", sort="-y", title="PTJ", axis=alt.Axis(labelAngle=-45)),
+            y=alt.Y("Jumlah Aset:Q", title=series_label),
+            tooltip=[
+                alt.Tooltip("PTJ:N", title="PTJ"),
+                alt.Tooltip("Jumlah Aset:Q", title=series_label, format=","),
+            ],
+        )
+        .properties(title=title, height=390)
+    )
+
+    event = st.altair_chart(
+        chart,
+        use_container_width=True,
+        key=chart_key,
+        on_select="rerun",
+        selection_mode="points",
+    )
+
+    try:
+        points = event.selection.get("points", [])
+    except Exception:
+        points = []
+
+    if points:
+        selected_ptj = points[0].get("PTJ")
+        if selected_ptj is not None:
+            return str(selected_ptj)
+    return None
+
+
+def interactive_location_chart(df: pd.DataFrame, chart_key: str):
+    """Graf lokasi interaktif; klik bar untuk tapis ikut PTJ dan sumber lokasi."""
+    if df.empty:
+        show_empty_chart_message()
+        return None, None
+
+    sap_chart = (
+        df["PTJ SAP"]
+        .fillna("Tidak Dipetakan")
+        .astype(str)
+        .value_counts()
+        .rename_axis("PTJ")
+        .reset_index(name="Jumlah Aset")
+    )
+    sap_chart["Sumber Lokasi"] = "Lokasi dalam SAP"
+
+    easset_chart = (
+        df["PTJ E-Asset"]
+        .fillna("Tidak Dipetakan")
+        .astype(str)
+        .value_counts()
+        .rename_axis("PTJ")
+        .reset_index(name="Jumlah Aset")
+    )
+    easset_chart["Sumber Lokasi"] = "Lokasi dalam E-Asset"
+
+    chart_df = pd.concat([sap_chart, easset_chart], ignore_index=True)
+
+    chart = (
+        alt.Chart(chart_df)
+        .mark_bar(cornerRadiusEnd=3)
+        .encode(
+            x=alt.X("PTJ:N", sort="-y", title="PTJ", axis=alt.Axis(labelAngle=-45)),
+            y=alt.Y("Jumlah Aset:Q", title="Jumlah Aset"),
+            xOffset=alt.XOffset("Sumber Lokasi:N"),
+            color=alt.Color("Sumber Lokasi:N", title="Sumber Lokasi"),
+            tooltip=[
+                alt.Tooltip("PTJ:N", title="PTJ"),
+                alt.Tooltip("Sumber Lokasi:N", title="Sumber"),
+                alt.Tooltip("Jumlah Aset:Q", title="Jumlah Aset", format=","),
+            ],
+        )
+        .properties(title="Aset Berlainan Lokasi Mengikut PTJ", height=420)
+    )
+
+    event = st.altair_chart(
+        chart,
+        use_container_width=True,
+        key=chart_key,
+        on_select="rerun",
+        selection_mode="points",
+    )
+
+    try:
+        points = event.selection.get("points", [])
+    except Exception:
+        points = []
+
+    if points:
+        point = points[0]
+        selected_ptj = point.get("PTJ")
+        selected_source = point.get("Sumber Lokasi")
+        if selected_ptj is not None and selected_source is not None:
+            return str(selected_ptj), str(selected_source)
+    return None, None
+
+
 # =========================================================
 # SUMBER FAIL DAN PROSES DATA
 # =========================================================
@@ -431,74 +555,121 @@ tab_sap, tab_easset, tab_location = st.tabs(
 
 with tab_sap:
     st.markdown("#### Graf Hanya di SAP Mengikut PTJ")
-    only_sap_chart = count_by_column(only_sap, "PTJ")
-    if only_sap_chart.empty:
-        show_empty_chart_message()
-    else:
-        st.bar_chart(only_sap_chart, use_container_width=True, height=420)
+    selected_sap_ptj = interactive_ptj_chart(
+        only_sap,
+        "PTJ",
+        "chart_only_sap_ptj",
+        "Hanya di SAP Mengikut PTJ",
+    )
+
+    sap_report = only_sap.copy()
+    if selected_sap_ptj:
+        sap_report = sap_report[
+            sap_report["PTJ"].fillna("Tidak Dipetakan").astype(str) == selected_sap_ptj
+        ].copy()
+        st.success(f"Paparan ditapis mengikut PTJ: **{selected_sap_ptj}**")
+        if st.button("Reset pilihan graf SAP", key="reset_chart_only_sap"):
+            st.session_state.pop("chart_only_sap_ptj", None)
+            st.rerun()
 
     preferred = [
         "No. Aset SAP", "Nama Aset", "Eval Group 1", "PTJ", "Kategori Aset",
         "Acquis.val.", "Book val."
     ]
-    columns = [c for c in preferred if c in only_sap.columns]
-    st.dataframe(only_sap[columns], use_container_width=True, hide_index=True, height=470)
+    columns = [c for c in preferred if c in sap_report.columns]
+    st.caption(f"Jumlah rekod dipaparkan: {len(sap_report):,}")
+    st.dataframe(sap_report[columns], use_container_width=True, hide_index=True, height=470)
     st.download_button(
         "Muat turun CSV — Hanya di SAP",
-        only_sap[columns].to_csv(index=False).encode("utf-8-sig"),
-        file_name="hanya_di_sap.csv",
+        sap_report[columns].to_csv(index=False).encode("utf-8-sig"),
+        file_name=(
+            f"hanya_di_sap_{selected_sap_ptj}.csv"
+            if selected_sap_ptj else "hanya_di_sap.csv"
+        ),
         mime="text/csv",
     )
 
 with tab_easset:
     st.markdown("#### Graf Hanya di E-Asset Mengikut PTJ")
-    only_easset_chart = count_by_column(only_easset, "PTJ")
-    if only_easset_chart.empty:
-        show_empty_chart_message()
-    else:
-        st.bar_chart(only_easset_chart, use_container_width=True, height=420)
+    selected_easset_ptj = interactive_ptj_chart(
+        only_easset,
+        "PTJ",
+        "chart_only_easset_ptj",
+        "Hanya di E-Asset Mengikut PTJ",
+    )
+
+    easset_report = only_easset.copy()
+    if selected_easset_ptj:
+        easset_report = easset_report[
+            easset_report["PTJ"].fillna("Tidak Dipetakan").astype(str) == selected_easset_ptj
+        ].copy()
+        st.success(f"Paparan ditapis mengikut PTJ: **{selected_easset_ptj}**")
+        if st.button("Reset pilihan graf E-Asset", key="reset_chart_only_easset"):
+            st.session_state.pop("chart_only_easset_ptj", None)
+            st.rerun()
 
     preferred = [
         "No. Aset SAP", "Nama Aset", "No. Siri Pendaftaran", "Eval Group 1", "PTJ",
         "Kategori Aset", "Lokasi", "Pegawai Penempatan", "Harga (RM)"
     ]
-    columns = [c for c in preferred if c in only_easset.columns]
-    st.dataframe(only_easset[columns], use_container_width=True, hide_index=True, height=470)
+    columns = [c for c in preferred if c in easset_report.columns]
+    st.caption(f"Jumlah rekod dipaparkan: {len(easset_report):,}")
+    st.dataframe(easset_report[columns], use_container_width=True, hide_index=True, height=470)
     st.download_button(
         "Muat turun CSV — Hanya di E-Asset",
-        only_easset[columns].to_csv(index=False).encode("utf-8-sig"),
-        file_name="hanya_di_easset.csv",
+        easset_report[columns].to_csv(index=False).encode("utf-8-sig"),
+        file_name=(
+            f"hanya_di_easset_{selected_easset_ptj}.csv"
+            if selected_easset_ptj else "hanya_di_easset.csv"
+        ),
         mime="text/csv",
     )
 
 with tab_location:
     st.markdown("#### Graf Aset Berlainan Lokasi Mengikut PTJ")
-    if different_location.empty:
-        show_empty_chart_message()
-    else:
-        sap_ptj_chart = count_by_column(
-            different_location, "PTJ SAP", "Lokasi dalam SAP"
+    selected_location_ptj, selected_location_source = interactive_location_chart(
+        different_location,
+        "chart_different_location_ptj",
+    )
+
+    location_report = different_location.copy()
+    if selected_location_ptj and selected_location_source:
+        filter_column = (
+            "PTJ SAP"
+            if selected_location_source == "Lokasi dalam SAP"
+            else "PTJ E-Asset"
         )
-        easset_ptj_chart = count_by_column(
-            different_location, "PTJ E-Asset", "Lokasi dalam E-Asset"
+        location_report = location_report[
+            location_report[filter_column]
+            .fillna("Tidak Dipetakan")
+            .astype(str)
+            == selected_location_ptj
+        ].copy()
+        st.success(
+            f"Paparan ditapis: **{selected_location_ptj}** — "
+            f"{selected_location_source}"
         )
-        location_chart = sap_ptj_chart.join(easset_ptj_chart, how="outer").fillna(0)
-        location_chart = location_chart.astype(int)
-        st.bar_chart(location_chart, use_container_width=True, height=450)
+        if st.button("Reset pilihan graf lokasi", key="reset_chart_location"):
+            st.session_state.pop("chart_different_location_ptj", None)
+            st.rerun()
 
     location_columns = [
         "No. Aset SAP", "Nama Aset E-Asset", "Kategori Aset",
         "Eval Group SAP", "PTJ SAP", "Eval Group E-Asset", "PTJ E-Asset"
     ]
+    st.caption(f"Jumlah rekod dipaparkan: {len(location_report):,}")
     st.dataframe(
-        different_location[location_columns],
+        location_report[location_columns],
         use_container_width=True,
         hide_index=True,
         height=470,
     )
     st.download_button(
         "Muat turun CSV — Aset Berlainan Lokasi",
-        different_location[location_columns].to_csv(index=False).encode("utf-8-sig"),
-        file_name="aset_berlainan_lokasi.csv",
+        location_report[location_columns].to_csv(index=False).encode("utf-8-sig"),
+        file_name=(
+            f"aset_berlainan_lokasi_{selected_location_ptj}.csv"
+            if selected_location_ptj else "aset_berlainan_lokasi.csv"
+        ),
         mime="text/csv",
     )
