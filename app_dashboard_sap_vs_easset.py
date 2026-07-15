@@ -320,6 +320,47 @@ def show_empty_chart_message():
     st.info("Tiada data untuk dipaparkan dalam graf berdasarkan tapisan semasa.")
 
 
+def _extract_selection_rows(event, selection_name: str) -> list[dict]:
+    """Baca selection Altair dengan selamat untuk pelbagai versi Streamlit."""
+    try:
+        selection = event.selection.get(selection_name, [])
+    except Exception:
+        try:
+            selection = event.get("selection", {}).get(selection_name, [])
+        except Exception:
+            return []
+
+    if selection is None:
+        return []
+
+    # Bentuk biasa: [{"PTJ": "..."}]
+    if isinstance(selection, list):
+        return [row for row in selection if isinstance(row, dict)]
+
+    # Sesetengah versi memulangkan {"PTJ": ["..."]}
+    if isinstance(selection, dict):
+        keys = list(selection.keys())
+        if not keys:
+            return []
+        max_len = max(
+            len(v) if isinstance(v, list) else 1
+            for v in selection.values()
+        )
+        rows = []
+        for i in range(max_len):
+            row = {}
+            for key, value in selection.items():
+                if isinstance(value, list):
+                    if i < len(value):
+                        row[key] = value[i]
+                else:
+                    row[key] = value
+            rows.append(row)
+        return rows
+
+    return []
+
+
 def interactive_ptj_chart(
     df: pd.DataFrame,
     ptj_column: str,
@@ -342,17 +383,26 @@ def interactive_ptj_chart(
         .sort_values("Jumlah Aset", ascending=False)
     )
 
+    selection_name = f"{chart_key}_selection"
+    selector = alt.selection_point(
+        name=selection_name,
+        fields=["PTJ"],
+        clear="dblclick",
+    )
+
     chart = (
         alt.Chart(chart_df)
         .mark_bar(cornerRadiusEnd=4)
         .encode(
             x=alt.X("PTJ:N", sort="-y", title="PTJ", axis=alt.Axis(labelAngle=-45)),
             y=alt.Y("Jumlah Aset:Q", title=series_label),
+            opacity=alt.condition(selector, alt.value(1.0), alt.value(0.45)),
             tooltip=[
                 alt.Tooltip("PTJ:N", title="PTJ"),
                 alt.Tooltip("Jumlah Aset:Q", title=series_label, format=","),
             ],
         )
+        .add_params(selector)
         .properties(title=title, height=390)
     )
 
@@ -361,16 +411,12 @@ def interactive_ptj_chart(
         use_container_width=True,
         key=chart_key,
         on_select="rerun",
-        selection_mode="points",
+        selection_mode=selection_name,
     )
 
-    try:
-        points = event.selection.get("points", [])
-    except Exception:
-        points = []
-
-    if points:
-        selected_ptj = points[0].get("PTJ")
+    rows = _extract_selection_rows(event, selection_name)
+    if rows:
+        selected_ptj = rows[0].get("PTJ")
         if selected_ptj is not None:
             return str(selected_ptj)
     return None
@@ -404,6 +450,13 @@ def interactive_location_chart(df: pd.DataFrame, chart_key: str):
 
     chart_df = pd.concat([sap_chart, easset_chart], ignore_index=True)
 
+    selection_name = f"{chart_key}_selection"
+    selector = alt.selection_point(
+        name=selection_name,
+        fields=["PTJ", "Sumber Lokasi"],
+        clear="dblclick",
+    )
+
     chart = (
         alt.Chart(chart_df)
         .mark_bar(cornerRadiusEnd=3)
@@ -412,12 +465,14 @@ def interactive_location_chart(df: pd.DataFrame, chart_key: str):
             y=alt.Y("Jumlah Aset:Q", title="Jumlah Aset"),
             xOffset=alt.XOffset("Sumber Lokasi:N"),
             color=alt.Color("Sumber Lokasi:N", title="Sumber Lokasi"),
+            opacity=alt.condition(selector, alt.value(1.0), alt.value(0.45)),
             tooltip=[
                 alt.Tooltip("PTJ:N", title="PTJ"),
                 alt.Tooltip("Sumber Lokasi:N", title="Sumber"),
                 alt.Tooltip("Jumlah Aset:Q", title="Jumlah Aset", format=","),
             ],
         )
+        .add_params(selector)
         .properties(title="Aset Berlainan Lokasi Mengikut PTJ", height=420)
     )
 
@@ -426,16 +481,12 @@ def interactive_location_chart(df: pd.DataFrame, chart_key: str):
         use_container_width=True,
         key=chart_key,
         on_select="rerun",
-        selection_mode="points",
+        selection_mode=selection_name,
     )
 
-    try:
-        points = event.selection.get("points", [])
-    except Exception:
-        points = []
-
-    if points:
-        point = points[0]
+    rows = _extract_selection_rows(event, selection_name)
+    if rows:
+        point = rows[0]
         selected_ptj = point.get("PTJ")
         selected_source = point.get("Sumber Lokasi")
         if selected_ptj is not None and selected_source is not None:
@@ -568,9 +619,7 @@ with tab_sap:
             sap_report["PTJ"].fillna("Tidak Dipetakan").astype(str) == selected_sap_ptj
         ].copy()
         st.success(f"Paparan ditapis mengikut PTJ: **{selected_sap_ptj}**")
-        if st.button("Reset pilihan graf SAP", key="reset_chart_only_sap"):
-            st.session_state.pop("chart_only_sap_ptj", None)
-            st.rerun()
+        st.caption("Klik dua kali pada graf untuk membuang pilihan PTJ.")
 
     preferred = [
         "No. Aset SAP", "Nama Aset", "Eval Group 1", "PTJ", "Kategori Aset",
@@ -604,9 +653,7 @@ with tab_easset:
             easset_report["PTJ"].fillna("Tidak Dipetakan").astype(str) == selected_easset_ptj
         ].copy()
         st.success(f"Paparan ditapis mengikut PTJ: **{selected_easset_ptj}**")
-        if st.button("Reset pilihan graf E-Asset", key="reset_chart_only_easset"):
-            st.session_state.pop("chart_only_easset_ptj", None)
-            st.rerun()
+        st.caption("Klik dua kali pada graf untuk membuang pilihan PTJ.")
 
     preferred = [
         "No. Aset SAP", "Nama Aset", "No. Siri Pendaftaran", "Eval Group 1", "PTJ",
@@ -649,9 +696,7 @@ with tab_location:
             f"Paparan ditapis: **{selected_location_ptj}** — "
             f"{selected_location_source}"
         )
-        if st.button("Reset pilihan graf lokasi", key="reset_chart_location"):
-            st.session_state.pop("chart_different_location_ptj", None)
-            st.rerun()
+        st.caption("Klik dua kali pada graf untuk membuang pilihan PTJ.")
 
     location_columns = [
         "No. Aset SAP", "Nama Aset E-Asset", "Kategori Aset",
