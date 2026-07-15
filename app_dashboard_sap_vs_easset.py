@@ -92,6 +92,25 @@ st.markdown(
             margin-top: .4rem;
         }
         .kpi-note { color: #7b8fa3; font-size: .82rem; margin-top: .35rem; }
+        .kpi-link {
+            display: block;
+            color: inherit !important;
+            text-decoration: none !important;
+            border-radius: 16px;
+        }
+        .kpi-link .kpi-card {
+            cursor: pointer;
+            transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+        }
+        .kpi-link:hover .kpi-card {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 28px rgba(15, 40, 65, 0.15);
+            border-color: #91b7d5;
+        }
+        .kpi-link:focus .kpi-card {
+            outline: 3px solid rgba(31, 95, 139, 0.25);
+            outline-offset: 2px;
+        }
         .section-title {
             font-size: 1.15rem;
             font-weight: 800;
@@ -287,17 +306,29 @@ def build_comparison(sap: pd.DataFrame, easset: pd.DataFrame):
     return only_sap, only_easset, different_location
 
 
-def kpi_card(label: str, value: int, note: str, icon: str):
-    st.markdown(
-        f"""
+def kpi_card(
+    label: str,
+    value: int,
+    note: str,
+    icon: str,
+    link: str | None = None,
+):
+    """Papar kad KPI. Jika link diberi, seluruh kad boleh diklik."""
+    card_html = f"""
         <div class="kpi-card">
             <div class="kpi-label">{icon} {label}</div>
             <div class="kpi-value">{value:,}</div>
             <div class="kpi-note">{note}</div>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    """
+
+    if link:
+        card_html = (
+            f'<a class="kpi-link" href="{link}" target="_self" '
+            f'aria-label="Buka laporan {label}">{card_html}</a>'
+        )
+
+    st.markdown(card_html, unsafe_allow_html=True)
 
 
 def count_by_column(df: pd.DataFrame, column: str, value_name: str = "Jumlah Aset") -> pd.DataFrame:
@@ -618,22 +649,25 @@ with col1:
     kpi_card(
         "Hanya di SAP",
         len(only_sap),
-        "Sebahagian daripada jumlah SAP yang tiada dalam E-Asset",
+        "Klik untuk pergi ke graf aset yang hanya terdapat dalam SAP",
         "🟦",
+        link="?laporan=sap#butiran-perbandingan",
     )
 with col2:
     kpi_card(
         "Hanya di E-Asset",
         len(only_easset),
-        "Sebahagian daripada jumlah E-Asset yang tiada dalam SAP",
+        "Klik untuk pergi ke graf aset yang hanya terdapat dalam E-Asset",
         "🟩",
+        link="?laporan=easset#butiran-perbandingan",
     )
 with col3:
     kpi_card(
         "Aset Berlainan Lokasi",
         len(different_location),
-        "Aset wujud dalam kedua-dua sistem tetapi Eval Group 1 berbeza",
+        "Klik untuk pergi ke graf aset yang mempunyai lokasi berbeza",
         "🟧",
+        link="?laporan=lokasi#butiran-perbandingan",
     )
 
 st.info(
@@ -642,13 +676,28 @@ st.info(
     "jadi jumlah laporan tersebut memang tidak sama dengan jumlah keseluruhan aset."
 )
 
-st.markdown("<div class='section-title'>Butiran Perbandingan</div>", unsafe_allow_html=True)
+# Pautan KPI menggunakan query parameter untuk membuka tab yang berkaitan.
+report_param = str(st.query_params.get("laporan", "sap")).lower()
+if report_param not in {"sap", "easset", "lokasi"}:
+    report_param = "sap"
+
+label_sap = f"Hanya di SAP ({len(only_sap):,})"
+label_easset = f"Hanya di E-Asset ({len(only_easset):,})"
+label_location = f"Berlainan Lokasi ({len(different_location):,})"
+default_tab = {
+    "sap": label_sap,
+    "easset": label_easset,
+    "lokasi": label_location,
+}[report_param]
+
+st.markdown(
+    "<div id='butiran-perbandingan'></div>"
+    "<div class='section-title'>Butiran Perbandingan</div>",
+    unsafe_allow_html=True,
+)
 tab_sap, tab_easset, tab_location = st.tabs(
-    [
-        f"Hanya di SAP ({len(only_sap):,})",
-        f"Hanya di E-Asset ({len(only_easset):,})",
-        f"Berlainan Lokasi ({len(different_location):,})",
-    ]
+    [label_sap, label_easset, label_location],
+    default=default_tab,
 )
 
 with tab_sap:
