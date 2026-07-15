@@ -367,6 +367,7 @@ def interactive_ptj_chart(
     chart_key: str,
     title: str,
     series_label: str = "Jumlah Aset",
+    ptj_label_color: str = "#132238",
 ):
     """Papar graf PTJ yang boleh diklik dan pulangkan PTJ yang dipilih."""
     if df.empty or ptj_column not in df.columns:
@@ -394,7 +395,17 @@ def interactive_ptj_chart(
         alt.Chart(chart_df)
         .mark_bar(cornerRadiusEnd=4)
         .encode(
-            x=alt.X("PTJ:N", sort="-y", title="PTJ", axis=alt.Axis(labelAngle=-45)),
+            x=alt.X(
+                "PTJ:N",
+                sort="-y",
+                title="PTJ",
+                axis=alt.Axis(
+                    labelAngle=-45,
+                    labelColor=ptj_label_color,
+                    titleColor=ptj_label_color,
+                    labelFontWeight="bold",
+                ),
+            ),
             y=alt.Y("Jumlah Aset:Q", title=series_label),
             opacity=alt.condition(selector, alt.value(1.0), alt.value(0.45)),
             tooltip=[
@@ -611,6 +622,7 @@ with tab_sap:
         "PTJ",
         "chart_only_sap_ptj",
         "Hanya di SAP Mengikut PTJ",
+        ptj_label_color="#d62828",
     )
 
     sap_report = only_sap.copy()
